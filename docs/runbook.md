@@ -54,7 +54,24 @@ kubectl exec -it mongodb-0 -n todo -- mongosh -u todoadmin -p change-me-local-on
 - `mongo-secret` içindeki kullanıcı adı/şifre backend'in beklediğiyle aynı değil
 - `mongodb-0` pod'u henüz `Running` değil — backend ondan önce ayağa kalkmaya çalışıyor (kısa süreli, genelde kendi kendine düzelir)
 
-## 4. Ingress üzerinden `todo.local` açılmıyor
+## 4. Sıfırdan kurulumda backend `readyz` sürekli `503` — Mongo DNS henüz hazır değilken bağlanmaya çalışıyor
+
+**Gerçek senaryo (sıfırdan cluster kurulumunda karşılaşıldı):** `kubectl apply -f k8s/` ile backend ve MongoDB StatefulSet'i aynı anda oluşturulunca, backend container'ı ayağa kalkar kalkmaz Mongo'ya bağlanmaya çalışır. Ama Mongo henüz `Ready` olmadığı için headless Service'in pod-DNS kaydı (`mongodb-0.mongodb.todo.svc.cluster.local`) henüz mevcut değildir. Sonuç:
+
+```
+MongoDB bağlantı hatası: getaddrinfo ENOTFOUND mongodb-0.mongodb.todo.svc.cluster.local
+```
+
+Uygulama kodu bu ilk bağlantı denemesinden sonra otomatik tekrar denemediği için backend sonsuza kadar `readyz`'de `503` döner, `kubectl describe pod` içinde tekrarlayan `Readiness probe failed: HTTP probe failed with statuscode: 503` görülür.
+
+**Çözüm:** Mongo `1/1 Running` olduktan sonra backend'i yeniden başlat:
+```bash
+kubectl rollout restart deployment/backend -n todo
+```
+
+**Kalıcı çözüm (ileride yapılabilir):** Backend'e bir init container ekleyip Mongo DNS'inin hazır olmasını bekletmek, ya da uygulama kodunda bağlantı koptuğunda/başarısız olduğunda periyodik yeniden deneme (retry) mantığı eklemek. Bu proje kapsamında zaman kısıtından dolayı basit restart çözümü tercih edildi.
+
+## 5. Ingress üzerinden `todo.local` açılmıyor
 
 **Teşhis:**
 ```bash
@@ -69,7 +86,7 @@ cat /etc/hosts | grep todo.local
 - `ingress-nginx-controller` pod'u henüz hazır değil (`scripts/kind-up.sh` bunu bekliyor ama manuel kurulumda unutulabilir)
 - Servis adları Ingress'teki referanslarla uyuşmuyor (`k8s/06-ingress.yaml` → `backend`/`frontend` Service adları)
 
-## 5. Genel kural
+## 6. Genel kural
 
 Bir şey beklenmedik davranıyorsa sırayla:
 ```bash

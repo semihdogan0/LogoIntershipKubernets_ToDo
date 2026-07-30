@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Bağımlılıkları kur
+        run: npm install
+
+      - name: Sözdizimi kontrolü
+        run: node --check server.js
+
+      - name: Docker image build (test amaçlı, push yok)
+        run: docker build -t todo-backend:ci .
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Bağımlılıkları kur
+        run: npm install
+
+      - name: Production build
+        run: npm run build
+
+      - name: Docker image build (test amaçlı, push yok)
+        run: docker build -t todo-frontend:ci .

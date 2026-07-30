@@ -49,11 +49,13 @@ Namespace: todo
 | Veritabanı | MongoDB 7 |
 | Container | Docker (multi-stage build) |
 | Orkestrasyon | Kubernetes (kind) |
-| CI/CD | GitHub Actions + GHCR |
+| CI/CD | GitHub Actions (bağımlılık kurulumu, build ve Docker image doğrulaması — registry push yok) |
 
 ---
 
 ## API Sözleşmesi
+
+Ayrıntılı sürüm ve ortam değişkenleri için bkz. [`docs/api.md`](./docs/api.md).
 
 | Method | Path | Gövde | Yanıt |
 |---|---|---|---|
@@ -73,12 +75,17 @@ Namespace: todo
 ├── .github/workflows/ci.yml
 ├── frontend/
 │   ├── Dockerfile
-│   ├── nginx.conf
+│   ├── index.html
+│   ├── package.json
+│   ├── vite.config.js
 │   └── src/
+│       ├── main.jsx
+│       └── App.jsx
 ├── backend/
 │   ├── Dockerfile
 │   ├── server.js
-│   └── package.json
+│   ├── package.json
+│   └── .env.example
 ├── k8s/
 │   ├── 00-namespace.yaml
 │   ├── 01-secret.yaml
@@ -87,8 +94,13 @@ Namespace: todo
 │   ├── 04-backend.yaml      # Deployment + Service
 │   ├── 05-frontend.yaml     # Deployment + Service
 │   └── 06-ingress.yaml
-├── scripts/kind-up.sh
-├── docs/runbook.md
+├── scripts/
+│   ├── kind-up.sh
+│   └── save.sh              # tek komutla add+commit+push
+├── docs/
+│   ├── api.md               # backend/frontend API sözleşmesi
+│   ├── demo.md               # rolling update & rollback testi, gerçek çıktılarla
+│   └── runbook.md            # sık karşılaşılan sorunlar ve çözümleri
 └── images/
 ```
 
@@ -151,27 +163,27 @@ kubectl get pods -n todo -w
 
 ---
 
-## Rolling Update
+## Rolling Update & Rollback — Test Edildi ✓
 
-Deployment `maxUnavailable: 0` ile yapılandırıldığı için güncelleme sırasında kesinti olmaz.
+Deployment `maxUnavailable: 0` ile yapılandırıldığı için güncelleme sırasında kesinti olmaz. Bu, gerçek bir senaryoyla doğrulandı: kesinti izleyici (`curl` loop) çalışırken v1 → v2 güncellemesi yapıldı, ardından kasıtlı olarak var olmayan bir imaj tag'ine geçilip Kubernetes'in bunu nasıl karşıladığı gözlemlendi, sonrasında rollback ile geri dönüldü.
+
+**Özet sonuç:** Test boyunca tek bir istek bile başarısız olmadı — bozuk imaj deploy edildiğinde bile eski pod'lar `maxUnavailable: 0` sayesinde ayakta kaldı, yeni pod `ImagePullBackOff`'a düşse dahi kullanıcı hiçbir kesinti yaşamadı. Rollback ~1 dakikada tamamlandı.
+
+Tüm komutlar, gerçek terminal çıktıları ve öğrenilen dersler için bkz. **[`docs/demo.md`](./docs/demo.md)**.
 
 ```bash
-# Ayrı bir terminalde kesinti izleyicisi
-while true; do curl -s -o /dev/null -w "%{http_code} " todo.local/healthz; sleep 0.2; done
-
-# Yeni sürümü çıkar
+# Kısaca akış:
 docker build -t todo-backend:v2 ./backend
 kind load docker-image todo-backend:v2 --name todo
 kubectl set image deployment/backend backend=todo-backend:v2 -n todo
 kubectl rollout status deployment/backend -n todo
-```
 
-## Rollback
-
-```bash
+# Geri dönüş gerekirse:
 kubectl rollout history deployment/backend -n todo
 kubectl rollout undo deployment/backend -n todo
 ```
+
+Sorun giderme için bkz. **[`docs/runbook.md`](./docs/runbook.md)**.
 
 ---
 
@@ -199,17 +211,22 @@ kubectl rollout undo deployment/backend -n todo
 | Alan | Sorumlu |
 |---|---|
 | Backend API + Dockerfile | Kişi A |
-| Frontend + Dockerfile + nginx config | Kişi B |
+| Frontend (React + Vite) + Dockerfile | Kişi B |
 | MongoDB StatefulSet, Secret, ConfigMap | Kişi A |
-| Deployment / Service / Ingress | Kişi B |
+| Deployment / Service / Ingress | Kişi A |
 | GitHub Actions CI | Kişi A |
-| Rolling update & rollback testi, runbook | Kişi B |
+| Rolling update & rollback testi (`docs/demo.md`) | Kişi A |
+| Runbook, README | Ortak |
+
+> Not: Kişi B'nin şirket bilgisayarında Docker/Kubernetes kurulum yetkisi olmadığı için cluster'a dokunan tüm işler (manifestler, deploy, rolling update/rollback testi) Kişi A'nın makinesinde yapıldı. Kişi B uygulama kodu ve dokümantasyon tarafına odaklandı.
 
 Her PR karşı taraf tarafından review edilir; `main`'e doğrudan push kapalıdır.
 
 ---
 
 ## Ekran Görüntüleri
+
+> TODO: Aşağıdaki görseller yer tutucudur — `images/` klasörüne gerçek ekran görüntülerini ekleyip bu bölümü güncelleyin (pod listesi, service listesi, çalışan uygulama, rolling update terminal çıktısı).
 
 ### Pod Listesi
 ![Pod Listesi](images/pods.png)
@@ -241,7 +258,7 @@ Her PR karşı taraf tarafından review edilir; `main`'e doğrudan push kapalıd
 
 ## CV Açıklaması
 
-> React, Node.js ve MongoDB tabanlı bir ToDo uygulamasını multi-stage Docker build ile container'layıp Kubernetes üzerinde dağıttım. Deployment, StatefulSet, Service, Ingress, ConfigMap ve Secret kaynaklarını yapılandırdım; liveness/readiness probe'ları ve resource limitleri tanımlayarak `maxUnavailable: 0` ile sıfır kesintili rolling update ve rollback senaryolarını doğruladım. GitHub Actions ile image build ve GHCR'ye push eden bir CI hattı kurdum.
+> React, Node.js ve MongoDB tabanlı bir ToDo uygulamasını multi-stage Docker build ile container'layıp Kubernetes (kind) üzerinde dağıttım. Deployment, StatefulSet, Service, Ingress, ConfigMap ve Secret kaynaklarını yapılandırdım; liveness/readiness probe'ları ve resource limitleri tanımlayarak `maxUnavailable: 0` ile sıfır kesintili rolling update ve rollback senaryolarını gerçek testlerle doğruladım (bkz. docs/demo.md). GitHub Actions ile build ve Docker image doğrulaması yapan bir CI hattı kurdum.
 
 ---
 

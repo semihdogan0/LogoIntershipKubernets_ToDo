@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: todo-config
+  namespace: todo
+data:
+  MONGO_DB: "tododb"
+  # StatefulSet adı "mongodb", headless Service adı "mongodb", namespace "todo".
+  # Pod DNS adresi: <pod-adi>.<service-adi>.<namespace>.svc.cluster.local
+  MONGO_HOST: "mongodb-0.mongodb.todo.svc.cluster.local"
+  PORT: "3000"

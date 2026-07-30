@@ -91,5 +91,5 @@ app.delete('/api/todos/:id', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Backend ${PORT} portunda çalışıyor`);
+  console.log(`Backend ${PORT} portunda çalışıyor (v2)`);
 });
